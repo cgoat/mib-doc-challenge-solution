@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -24,6 +25,8 @@ BUDGET_PER_PDF = float(os.environ.get("MIB_BUDGET_PER_PDF", "5.0"))
 # obviously-synthetic sentinel rather than left blank. These never reach the
 # rules engine - adjudication runs on the real, possibly-absent values.
 UNRECOVERED = {"sponsor_id": "SPN-0000", "arrival_date": "1900-01-01", "risk_flags": "none"}
+
+CASE_ID_PAT = re.compile(r"MIB-\d{6}")
 
 
 def _init_worker():
@@ -106,9 +109,16 @@ def main(argv: list[str]) -> int:
                 pending[pool.submit(_predict_one, (path, degraded))] = path
             done = next(as_completed(pending))
             row = done.result()
-            pending.pop(done)
+            source = pending.pop(done)
             if row["case_id"] in seen:
-                continue
+                # Two packets resolved to the same id (a misread footer, say).
+                # Re-key the loser off its own file rather than dropping it and
+                # taking a missing-case penalty on a packet we did process.
+                stem = Path(source).stem
+                if CASE_ID_PAT.fullmatch(stem) and stem not in seen:
+                    row["case_id"] = stem
+                else:
+                    continue
             seen.add(row["case_id"])
             out.write(json.dumps(row) + "\n")
             written += 1
