@@ -1,9 +1,9 @@
 # MIB Doc Challenge — technical memo
 
 **Score on the public training split (challenge `scripts/evaluate.py`):**
-`114.68 / 150` — extraction `40.19/50`, classification `59.17/80`, calibration
-`15.32/20`, 0 missing cases, 14 catastrophic false approvals against 431 true
-denials. Runtime ~1.0 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.23 GiB.
+`115.62 / 150` — extraction `40.39/50`, classification `59.79/80`, calibration
+`15.44/20`, 0 missing cases, 9 catastrophic false approvals against 431 true
+denials. Runtime 0.94 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.23 GiB.
 
 No LLM, no network, no API keys. PyMuPDF for the text layer, OpenCV + Tesseract
 for scans, a hand-written policy engine, and one 26-weight logistic model for
@@ -91,7 +91,7 @@ conditions; the ranking is insensitive to it because they rarely co-occur.
 approvals. Almost all were packets where I found no risk flag — because the
 biometric slip was unreadable or absent, not because the applicant was clean. So
 approval now requires having actually *read* flag evidence; "no flag found"
-defaults to review. That cut false approvals to 14 at no cost in total score.
+defaults to review. That cut false approvals from 74 to 14 at no cost in total score.
 I checked whether it was merely a scoring artefact: among fully-native packets
 with no biometric page at all, 30% still have a real risk flag in the labels. The
 evidence genuinely isn't in the packet, so review is the honest answer.
@@ -103,16 +103,16 @@ target is honesty, not a high number. The dominant predictor is *why* the
 decision was made — a signed adjudicator note is right 99.3% of the time, an
 unread risk panel 25.5%. A logistic model over the decision reason, OCR fraction,
 unreadable-page fraction, evidence recovered, and cross-page agreement gives a
-**5-fold cross-validated Brier of 0.123** (15.1/20) against 0.219 for the
+**5-fold cross-validated Brier of 0.121** (15.2/20) against 0.216 for the
 best constant predictor. I report the cross-validated figure because the
-in-sample 0.117 is optimistic.
+in-sample 0.114 is optimistic.
 
 ## Failure modes I know about
 
 - **Unreadable scans dominate the loss.** ~600 scanned pages still yield no
-  usable classification. That is most of the 158 packets sent to review that
-  should have been decided, and most of the missing `sponsor_id` (66%) and
-  `arrival_date` (79%) values.
+  usable classification. That is most of the 209 packets sent to review for an
+  unread risk panel that should have been decided outright, and most of the
+  missing `sponsor_id` and `arrival_date` values.
 - **Sponsor IDs are the weakest field.** They are 4 random digits with no
   vocabulary to snap to, and some are deliberately smudged. Digit-confusion
   repair helps but cannot verify.
