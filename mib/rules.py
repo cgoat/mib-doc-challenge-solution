@@ -65,13 +65,6 @@ def resolve_fields(packet: dict) -> dict:
     return fields
 
 
-def _waiver_applies(packet: dict, fields: dict) -> bool:
-    blob = " ".join(list(packet.get("waiver_codes") or ()) + list(packet.get("notes") or ()))
-    if re.search(r"dip[- ]?waiver|hardship|diplomatic waiver|fee exception", blob, re.I):
-        return True
-    return fields.get("visa_class") == "DIP-1"
-
-
 def adjudicate(packet: dict, fields: dict) -> tuple[str, list[str]]:
     """Return (adjudication, reasons)."""
     reasons: list[str] = []
@@ -107,7 +100,11 @@ def adjudicate(packet: dict, fields: dict) -> tuple[str, list[str]]:
         return "DENIED", ["transit_cannot_authorize_work"]
 
     fee = fields.get("fee_status")
-    if fee == "unpaid" and not _waiver_applies(packet, fields):
+    if fee == "unpaid":
+        # The manual reads as though a visible waiver could rescue an unpaid
+        # fee, but it never does in the labelled packets: all 50 unpaid cases
+        # are denied, diplomatic ones included. A waiver shows up as a "waived"
+        # fee status, not as an exception to an unpaid one.
         return "DENIED", ["fee_unpaid"]
 
     # Everything below is an unresolved-evidence condition, not a disqualifier.
