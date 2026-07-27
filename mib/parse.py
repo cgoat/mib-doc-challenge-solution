@@ -111,14 +111,15 @@ def _strip_junk(value: str) -> str:
 _TITLE_PAT = re.compile(r"form [ib]-|fee receipt|registry extract|attestation letter|adjudicator note", re.I)
 
 
-def _split_pairs(lines: list[str]) -> list[tuple[str, list[str]]]:
-    """Yield (label, candidate value strings) for each labelled row.
+def _split_pairs(lines: list[str]) -> list[tuple[str, list[str], bool]]:
+    """Yield (label, candidate values, recovered_by_value) for each labelled row.
 
     Both sides of the label are returned as candidates because the two-column
     native layout puts the value to the left while OCR'd scans put it to the
-    right; the caller picks whichever side normalizes to a valid value.
+    right; the caller picks whichever side normalizes to a valid value. The
+    third element marks rows identified by their value rather than their label.
     """
-    pairs: list[tuple[str, list[str]]] = []
+    pairs: list[tuple[str, list[str], bool]] = []
     pending: str | None = None
     for raw in lines:
         line = raw.strip()
@@ -129,7 +130,7 @@ def _split_pairs(lines: list[str]) -> list[tuple[str, list[str]]]:
             name, before, after = found
             candidates = [c for c in (_strip_junk(after), _strip_junk(before)) if c]
             if candidates:
-                pairs.append((name, candidates))
+                pairs.append((name, candidates, False))
                 pending = None
             else:
                 pending = name
@@ -137,8 +138,12 @@ def _split_pairs(lines: list[str]) -> list[tuple[str, list[str]]]:
         if pending:
             value = _strip_junk(line)
             if value:
-                pairs.append((pending, [value]))
+                pairs.append((pending, [value], False))
             pending = None
+            continue
+        recovered = _recover_by_value(line)
+        if recovered:
+            pairs.append((recovered[0], [line], True))
     return pairs
 
 
@@ -155,6 +160,52 @@ _NORMALIZERS = {
 }
 
 
+# Value-first recovery. When a scan mangles a label past the matching threshold
+# ("Antval Date", "mnsor ID") the value beside it often survives intact. If a
+# line carries a value that validates strictly for exactly one field, a much
+# weaker resemblance to that field's label is enough to assign it - the value
+# itself is doing the identifying.
+_STRICT_VALUE = (
+    ("arrival_date", lambda s: lx.norm_date(s)),
+    ("sponsor_id", lambda s: lx.norm_sponsor(s)),
+    ("species_code", lambda s: lx.snap(re.sub(r"[^A-Z_]", "", s.upper().replace(" ", "_")),
+                                       lx.SPECIES, min_ratio=0.75, margin=0.08)),
+    ("home_world", lambda s: lx.snap(s, lx.WORLDS, min_ratio=0.75, margin=0.08)),
+)
+_WEAK_LABEL_RATIO = 0.6
+
+
+def _resembles_label(line: str, field: str) -> bool:
+    variants = _LABELS.get(field, ())
+    tokens = [t for t in line.split() if not re.search(r"\d", t)]
+    for size in (1, 2):
+        for start in range(0, max(len(tokens) - size + 1, 0)):
+            window = re.sub(r"[^a-z ]", " ", " ".join(tokens[start:start + size]).lower())
+            window = re.sub(r"\s+", " ", window).strip()
+            if not window:
+                continue
+            if any(lx._ratio(window, v) >= _WEAK_LABEL_RATIO for v in variants):
+                return True
+    return False
+
+
+def _recover_by_value(line: str):
+    """Return (field, value) when a line identifies itself by its value."""
+    hits = []
+    for field, validator in _STRICT_VALUE:
+        try:
+            value = validator(line)
+        except Exception:
+            value = None
+        if value:
+            hits.append((field, value))
+    # Ambiguous lines are left alone; the point is to be sure, not greedy.
+    if len(hits) != 1:
+        return None
+    field, value = hits[0]
+    return (field, value) if _resembles_label(line, field) else None
+
+
 def _apply(normalizer, text):
     """Normalizers for closed vocabularies return (value, confident); the
     regex-backed ones return just a value."""
@@ -166,7 +217,7 @@ def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
     out = PageFields(kind=kind, source=source)
     blob = "\n".join(lines)
 
-    for label, candidates in _split_pairs(lines):
+    for label, candidates, recovered in _split_pairs(lines):
         if any(DAMAGE_PAT.search(c) for c in candidates):
             out.damaged.add(label)
             continue
@@ -197,7 +248,9 @@ def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
                 fallback = (normalized, False)
         if fallback and label not in out.values:
             out.values[label] = fallback[0]
-            if not fallback[1]:
+            # A value-identified row had no readable label, so the assignment
+            # itself is a guess even when the value parsed cleanly.
+            if not fallback[1] or recovered:
                 out.uncertain.add(label)
 
     for match in DAMAGE_PAT.finditer(blob):
