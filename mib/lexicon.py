@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date as _date
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
@@ -155,6 +156,11 @@ def norm_date(value):
         y, m, d = int(year), int(month), int(day)
     except ValueError:
         return None
-    if not (2000 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31):
+    if not 2000 <= y <= 2100:
         return None
-    return f"{y:04d}-{m:02d}-{d:02d}"
+    try:
+        # Reject impossible calendar dates: OCR happily turns a 30 into a 31,
+        # and the submission validator parses every date it is given.
+        return _date(y, m, d).isoformat()
+    except ValueError:
+        return None

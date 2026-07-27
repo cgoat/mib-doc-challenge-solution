@@ -60,6 +60,14 @@ def test_unknown_species_is_not_forced_onto_a_neighbour():
     assert lx.norm_species("ZZQQXX_NOTREAL") is None
 
 
+def test_impossible_calendar_dates_are_rejected():
+    # OCR turns 30 into 31 happily, and the submission validator parses dates.
+    assert lx.norm_date("2026-11-31") is None
+    assert lx.norm_date("2026-02-30") is None
+    assert lx.norm_date("2026-13-01") is None
+    assert lx.norm_date("2026-11-30") == "2026-11-30"
+
+
 def test_date_and_sponsor_digit_confusions():
     assert lx.norm_date("2O26-O3-15") == "2026-03-15"
     assert lx.norm_sponsor("SPN-67S9") == "SPN-6759"
