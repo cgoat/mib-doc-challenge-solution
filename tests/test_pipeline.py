@@ -148,6 +148,39 @@ def test_missing_fee_receipt_defaults_by_visa_class():
     assert resolve_fields(_packet(visa_class="XW-2"))["fee_status"] == "paid"
 
 
+def test_stale_arrival_date_is_denied_against_the_batch_reference():
+    import datetime
+    from mib.rules import batch_reference_date
+    ref = datetime.date(2026, 7, 5)
+    p = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                arrival_date="2025-06-01", sponsor_id="SPN-1234")
+    assert adjudicate(p, resolve_fields(p), reference_date=ref)[0] == "DENIED"
+    fresh = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                    arrival_date="2026-06-01", sponsor_id="SPN-1234")
+    assert adjudicate(fresh, resolve_fields(fresh), reference_date=ref)[0] == "APPROVED"
+
+
+def test_diplomatic_note_exempts_a_stale_packet():
+    import datetime
+    p = _packet(risk_flags="none", fee_status="waived", visa_class="DIP-1",
+                arrival_date="2025-06-01", sponsor_id="SPN-1234")
+    p["notes"] = ["Diplomatic waiver confirmed by Agent K. Fee exception stands."]
+    assert adjudicate(p, resolve_fields(p), reference_date=datetime.date(2026, 7, 5))[0] != "DENIED"
+
+
+def test_batch_reference_ignores_an_ocr_year_blowout():
+    from mib.rules import batch_reference_date
+    sets = [{"arrival_date": f"2026-0{1 + i % 6}-15"} for i in range(60)]
+    sets.append({"arrival_date": "2076-04-07"})   # a misread 2026
+    ref = batch_reference_date(sets)
+    assert ref is not None and ref.year == 2026
+
+
+def test_no_reference_when_the_batch_is_tiny():
+    from mib.rules import batch_reference_date
+    assert batch_reference_date([{"arrival_date": "2026-05-01"}]) is None
+
+
 # --- page classification ---------------------------------------------------
 
 def test_classifies_a_badly_ocrd_intake_title():
@@ -157,3 +190,14 @@ def test_classifies_a_badly_ocrd_intake_title():
 
 def test_unreadable_page_stays_unknown():
     assert classify_kind(["SCAN TAB", "CASEWORK"]) == "unknown"
+
+
+def test_page_kind_inferred_from_the_labels_it_yielded():
+    # A scan whose heading is destroyed still identifies itself by its fields.
+    from mib.document import infer_kind_from_labels
+    assert infer_kind_from_labels({"risk_flags": "none"}) == "biometric"
+    assert infer_kind_from_labels({"fee_status": "paid"}) == "fee"
+    assert infer_kind_from_labels({"visa_class": "XW-2"}) == "intake"
+    assert infer_kind_from_labels({"home_world": "Luyten-b", "species_code": "KAIJU_MICRO",
+                                   "arrival_date": "2026-07-11"}) == "registry"
+    assert infer_kind_from_labels({"applicant_name": "Zed Zarnax"}) == "unknown"

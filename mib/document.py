@@ -18,6 +18,28 @@ SOURCE_BONUS = {"text": 3.0, "ocr": 0.0}
 FOOTER_PAT = re.compile(r"Packet\s+(MIB[-\s]?\d{6})\s*/\s*page", re.I)
 HEADER_PAT = re.compile(r"(MIB-\d{6})\s*\|", re.I)
 
+# Which labels a page yielded identifies it more reliably than its title does:
+# a scan can lose its heading to noise and still parse every field cleanly.
+# Ordered most to least distinctive - only the intake form carries a visa class,
+# sponsor id or declared purpose, and only the biometric slip a flag panel.
+_LABEL_SIGNATURE = (
+    ("biometric", ("risk_flags", "biometric_confidence")),
+    ("fee", ("fee_status", "waiver_code")),
+    ("registry", ("registry_status",)),
+    ("intake", ("visa_class", "sponsor_id", "declared_purpose")),
+)
+
+
+def infer_kind_from_labels(values: dict) -> str:
+    for kind, keys in _LABEL_SIGNATURE:
+        if any(key in values for key in keys):
+            return kind
+    # A registry extract that lost its status line still has exactly the
+    # registry field set: identity and origin, but nothing about the visa.
+    if {"home_world", "species_code", "arrival_date"} <= set(values):
+        return "registry"
+    return "unknown"
+
 OUTPUT_FIELDS = ("applicant_name", "species_code", "home_world", "visa_class",
                  "sponsor_id", "arrival_date", "declared_purpose", "risk_flags", "fee_status")
 
@@ -84,8 +106,17 @@ def read_packet(path, text_only: bool = False) -> Packet:
                     # Footer text lives in the real text layer; keep both.
                     text.lines = ocr_lines + text.lines
                     packet.ocr_pages += 1
+            fields = parse_page(text.kind, text.lines, text.source)
+            if text.kind == "unknown":
+                inferred = infer_kind_from_labels(fields.values)
+                if inferred != "unknown":
+                    text.kind = inferred
+                    # Re-parse so the sponsor-letter and adjudicator-note
+                    # readers, which only run for their own page kind, get a
+                    # chance at a page the title lookup had written off.
+                    fields = parse_page(inferred, text.lines, text.source)
             page_texts.append(text)
-            parsed.append(parse_page(text.kind, text.lines, text.source))
+            parsed.append(fields)
     finally:
         doc.close()
 

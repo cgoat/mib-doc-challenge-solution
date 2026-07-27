@@ -5,7 +5,7 @@ import csv, json, sys, collections
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mib.rules import adjudicate, resolve_fields
+from mib.rules import adjudicate, batch_reference_date, resolve_fields
 from mib.confidence import confidence_for
 
 FIELDS = ["applicant_name","species_code","home_world","visa_class","sponsor_id",
@@ -29,17 +29,19 @@ def main():
     truth = {r["case_id"]: r for r in csv.DictReader(open(sys.argv[1]))}
     recs = [json.loads(l) for l in open(sys.argv[2])]
 
+    resolved = [(rec, resolve_fields(rec)) for rec in recs]
+    reference = batch_reference_date([f for _, f in resolved])
+
     ext_raw = ext_max = cls_raw = 0.0
     briers = []
     confusion = collections.Counter()
     reason_wrong = collections.Counter()
     cat = 0
-    for rec in recs:
+    for rec, fields in resolved:
         t = truth.get(rec["case_id"])
         if not t:
             continue
-        fields = resolve_fields(rec)
-        adj, reasons = adjudicate(rec, fields)
+        adj, reasons = adjudicate(rec, fields, reference_date=reference)
         conf = confidence_for(rec, fields, adj, reasons)
 
         for f in FIELDS:

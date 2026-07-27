@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mib.confidence import features
-from mib.rules import adjudicate, resolve_fields
+from mib.rules import adjudicate, batch_reference_date, resolve_fields
 
 L2 = 1.0
 STEPS = 4000
@@ -22,14 +22,15 @@ LR = 0.5
 
 def build(truth_path, cache_path):
     truth = {r["case_id"]: r for r in csv.DictReader(open(truth_path))}
+    records = [json.loads(line) for line in open(cache_path)]
+    resolved = [(rec, resolve_fields(rec)) for rec in records]
+    reference = batch_reference_date([f for _, f in resolved])
     rows, labels = [], []
-    for line in open(cache_path):
-        rec = json.loads(line)
+    for rec, fields in resolved:
         gold = truth.get(rec["case_id"])
         if not gold:
             continue
-        fields = resolve_fields(rec)
-        adj, reasons = adjudicate(rec, fields)
+        adj, reasons = adjudicate(rec, fields, reference_date=reference)
         rows.append(features(rec, fields, adj, reasons))
         labels.append(1.0 if adj == gold["adjudication"] else 0.0)
     names = sorted({k for r in rows for k in r})

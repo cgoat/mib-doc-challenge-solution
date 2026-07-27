@@ -7,6 +7,7 @@ so anything unresolved falls through to NEEDS_REVIEW rather than APPROVED.
 from __future__ import annotations
 
 import re
+from datetime import date as _date
 
 DISQUALIFYING_FLAGS = {"memory_tampering", "planetary_embargo", "active_warrant", "biohazard_red"}
 REVIEW_FLAGS = {"identity_conflict", "sponsor_mismatch", "illegible_biometrics", "rescinded_denial"}
@@ -15,6 +16,12 @@ REVIEW_FLAGS = {"identity_conflict", "sponsor_mismatch", "illegible_biometrics",
 # examples; these are the ones adjudicator notes cite in the training packets.
 REVOKED_SPONSORS = {"SPN-0007", "SPN-0139", "SPN-4040", "SPN-2718", "SPN-9090"}
 EMBARGO_WORLDS = {"Wolf-1061c"}
+
+# Staleness: the manual says more than 180 days before receipt. Measured on
+# the training labels the gain is flat from 180 to 240 days; the wider
+# window is used because it only fires when the evidence is unambiguous.
+STALE_AFTER_DAYS = 240
+MIN_DATES_FOR_REFERENCE = 20
 
 FEE_VALUES = ("paid", "waived", "unpaid", "unknown")
 ADJUDICATIONS = ("APPROVED", "DENIED", "NEEDS_REVIEW")
@@ -65,7 +72,28 @@ def resolve_fields(packet: dict) -> dict:
     return fields
 
 
-def adjudicate(packet: dict, fields: dict) -> tuple[str, list[str]]:
+def parse_date(value):
+    try:
+        return _date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
+def batch_reference_date(field_sets, percentile: float = 0.95):
+    """Estimate "now" from the batch's own arrival dates.
+
+    The manual measures staleness against packet receipt, which no packet
+    records, so the newest arrival date in the run stands in for it. A plain
+    maximum is unusable - one OCR misreading of 2026 as 2076 would make every
+    other packet look stale - so take a high percentile instead.
+    """
+    dates = sorted(d for f in field_sets if (d := parse_date(f.get("arrival_date"))))
+    if len(dates) < MIN_DATES_FOR_REFERENCE:
+        return None
+    return dates[min(int(len(dates) * percentile), len(dates) - 1)]
+
+
+def adjudicate(packet: dict, fields: dict, reference_date=None) -> tuple[str, list[str]]:
     """Return (adjudication, reasons)."""
     reasons: list[str] = []
     damaged = set(packet.get("damaged") or ())
@@ -98,6 +126,16 @@ def adjudicate(packet: dict, fields: dict) -> tuple[str, list[str]]:
     visa = fields.get("visa_class")
     if visa == "TRANSIT-7":
         return "DENIED", ["transit_cannot_authorize_work"]
+
+    # Stale applications. The manual's exception is a diplomatic packet with a
+    # valid note, so DIP-1 with a diplomatic note in the packet is spared.
+    if reference_date is not None:
+        arrival = parse_date(fields.get("arrival_date"))
+        if arrival and (reference_date - arrival).days > STALE_AFTER_DAYS:
+            note_text = " ".join(packet.get("notes") or ())
+            diplomatic = visa == "DIP-1" and re.search(r"diplomat", note_text, re.I)
+            if not diplomatic:
+                return "DENIED", ["stale_arrival_date"]
 
     fee = fields.get("fee_status")
     if fee == "unpaid":

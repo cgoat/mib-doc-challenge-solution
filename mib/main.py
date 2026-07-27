@@ -42,11 +42,26 @@ def _init_worker():
         pytesseract.pytesseract.tesseract_cmd = cmd
 
 
+def _decide(record: dict, fields: dict, case_id: str, reference_date=None) -> dict:
+    from mib.confidence import confidence_for
+    from mib.rules import adjudicate
+
+    adjudication, reasons = adjudicate(record, fields, reference_date=reference_date)
+    confidence = confidence_for(record, fields, adjudication, reasons)
+    row = {"case_id": case_id, "adjudication": adjudication, "confidence": confidence}
+    for name in OUTPUT_FIELDS:
+        if name in ("case_id", "adjudication", "confidence"):
+            continue
+        row[name] = fields.get(name) or UNRECOVERED.get(name, "")
+    if row["fee_status"] not in ("paid", "waived", "unpaid", "unknown"):
+        row["fee_status"] = "unknown"
+    return row
+
+
 def _predict_one(args) -> dict:
     path, text_only = args
-    from mib.confidence import confidence_for
     from mib.document import read_packet
-    from mib.rules import adjudicate, resolve_fields
+    from mib.rules import resolve_fields
 
     stem = Path(path).stem
     try:
@@ -60,23 +75,16 @@ def _predict_one(args) -> dict:
             "injection": packet.injection,
         }
         fields = resolve_fields(record)
-        adjudication, reasons = adjudicate(record, fields)
-        confidence = confidence_for(record, fields, adjudication, reasons)
         case_id = packet.case_id or stem
     except Exception:
         # A packet we cannot process at all still gets a conservative row: an
         # omission costs the missing-case penalty and forfeits the decision.
-        fields, case_id = {}, stem
-        adjudication, confidence = "NEEDS_REVIEW", 0.2
+        record, fields, case_id = {}, {}, stem
 
-    row = {"case_id": case_id, "adjudication": adjudication, "confidence": confidence}
-    for name in OUTPUT_FIELDS:
-        if name in ("case_id", "adjudication", "confidence"):
-            continue
-        row[name] = fields.get(name) or UNRECOVERED.get(name, "")
-    if row["fee_status"] not in ("paid", "waived", "unpaid", "unknown"):
-        row["fee_status"] = "unknown"
-    return row
+    # Decided provisionally here so a killed container still leaves a usable
+    # file; main() revisits every decision once the batch reference date exists.
+    return {"row": _decide(record, fields, case_id), "record": record,
+            "fields": fields, "case_id": case_id}
 
 
 def main(argv: list[str]) -> int:
@@ -94,7 +102,7 @@ def main(argv: list[str]) -> int:
 
     start = time.time()
     seen: set[str] = set()
-    written = 0
+    results: list[dict] = []
     degraded = False
     with output_path.open("w", encoding="utf-8") as out, ProcessPoolExecutor(
         max_workers=workers, initializer=_init_worker
@@ -108,29 +116,44 @@ def main(argv: list[str]) -> int:
                 path = queue.pop(0)
                 pending[pool.submit(_predict_one, (path, degraded))] = path
             done = next(as_completed(pending))
-            row = done.result()
+            result = done.result()
             source = pending.pop(done)
-            if row["case_id"] in seen:
+            case_id = result["case_id"]
+            if case_id in seen:
                 # Two packets resolved to the same id (a misread footer, say).
                 # Re-key the loser off its own file rather than dropping it and
                 # taking a missing-case penalty on a packet we did process.
                 stem = Path(source).stem
                 if CASE_ID_PAT.fullmatch(stem) and stem not in seen:
-                    row["case_id"] = stem
+                    case_id = result["case_id"] = result["row"]["case_id"] = stem
                 else:
                     continue
-            seen.add(row["case_id"])
-            out.write(json.dumps(row) + "\n")
-            written += 1
+            seen.add(case_id)
+            results.append(result)
+            out.write(json.dumps(result["row"]) + "\n")
             if not degraded and queue:
                 remaining = len(queue) + len(pending)
                 if time.time() + remaining * 0.15 > deadline:
                     degraded = True
                     print("time budget low: continuing without OCR", file=sys.stderr)
 
+    # Second pass. Staleness is measured against packet receipt, which no packet
+    # states, so it can only be judged once the whole batch has been read.
+    from mib.rules import batch_reference_date
+
+    reference = batch_reference_date([r["fields"] for r in results])
+    if reference is not None:
+        for result in results:
+            result["row"] = _decide(result["record"], result["fields"],
+                                    result["case_id"], reference_date=reference)
+        with output_path.open("w", encoding="utf-8") as out:
+            for result in results:
+                out.write(json.dumps(result["row"]) + "\n")
+        print(f"batch reference date {reference}: re-decided {len(results)} cases")
+
     elapsed = time.time() - start
     per_pdf = elapsed / max(len(files), 1)
-    print(f"wrote {written} predictions to {output_path} in {elapsed:.0f}s ({per_pdf:.2f}s/pdf)")
+    print(f"wrote {len(results)} predictions to {output_path} in {elapsed:.0f}s ({per_pdf:.2f}s/pdf)")
     return 0
 
 
