@@ -49,6 +49,7 @@ class Packet:
     case_id: str | None = None
     fields: dict[str, str] = field(default_factory=dict)
     agreement: dict[str, float] = field(default_factory=dict)
+    uncertain: set[str] = field(default_factory=set)
     damaged: set[str] = field(default_factory=set)
     kinds: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
@@ -128,12 +129,16 @@ def read_packet(path, text_only: bool = False) -> Packet:
     packet.case_id, packet.multi_applicant = _case_id_from_pages(page_texts)
 
     votes: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    # (field, value) pairs that at least one page read cleanly.
+    confident: set[tuple[str, str]] = set()
     for page_fields in parsed:
         weight = KIND_WEIGHT.get(page_fields.kind, 1) + SOURCE_BONUS.get(page_fields.source, 0.0)
         for name, value in page_fields.values.items():
             if name in ("waiver_code", "registry_status", "biometric_confidence"):
                 continue
             votes[name][value] += weight
+            if name not in page_fields.uncertain:
+                confident.add((name, value))
         packet.damaged |= page_fields.damaged
         if page_fields.adjudication and packet.note_adjudication is None:
             packet.note_adjudication = page_fields.adjudication
@@ -149,6 +154,8 @@ def read_packet(path, text_only: bool = False) -> Packet:
     for name, tally in votes.items():
         ranked = sorted(tally.items(), key=lambda kv: -kv[1])
         packet.fields[name] = ranked[0][0]
+        if (name, ranked[0][0]) not in confident:
+            packet.uncertain.add(name)
         total = sum(tally.values())
         packet.agreement[name] = ranked[0][1] / total if total else 0.0
 

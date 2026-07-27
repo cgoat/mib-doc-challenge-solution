@@ -68,7 +68,8 @@ def _predict_one(args) -> dict:
         packet = read_packet(path, text_only=text_only)
         record = {
             "case_id": packet.case_id, "fields": packet.fields, "agreement": packet.agreement,
-            "damaged": sorted(packet.damaged), "kinds": packet.kinds, "sources": packet.sources,
+            "damaged": sorted(packet.damaged), "uncertain": sorted(packet.uncertain),
+            "kinds": packet.kinds, "sources": packet.sources,
             "note_adjudication": packet.note_adjudication, "notes": packet.notes,
             "waiver_codes": packet.waiver_codes, "page_count": packet.page_count,
             "ocr_pages": packet.ocr_pages, "multi_applicant": packet.multi_applicant,

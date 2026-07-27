@@ -28,6 +28,7 @@ def _one(path: str):
         "fields": packet.fields,
         "agreement": packet.agreement,
         "damaged": sorted(packet.damaged),
+        "uncertain": sorted(packet.uncertain),
         "kinds": packet.kinds,
         "sources": packet.sources,
         "note_adjudication": packet.note_adjudication,

@@ -33,6 +33,9 @@ class PageFields:
     kind: str
     source: str
     values: dict[str, str] = field(default_factory=dict)
+    # Fields whose value is the nearest vocabulary match rather than a clear
+    # one. Reported, but never allowed to drive a denial.
+    uncertain: set[str] = field(default_factory=set)
     damaged: set[str] = field(default_factory=set)
     notes: list[str] = field(default_factory=list)
     adjudication: str | None = None
@@ -152,6 +155,13 @@ _NORMALIZERS = {
 }
 
 
+def _apply(normalizer, text):
+    """Normalizers for closed vocabularies return (value, confident); the
+    regex-backed ones return just a value."""
+    result = normalizer(text)
+    return result if isinstance(result, tuple) else (result, True)
+
+
 def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
     out = PageFields(kind=kind, source=source)
     blob = "\n".join(lines)
@@ -174,11 +184,21 @@ def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
         normalizer = _NORMALIZERS.get(label)
         if not normalizer:
             continue
+        # Try every candidate for a confident reading before settling for a
+        # guess: relaxing the match must not let junk on one side of the label
+        # pre-empt the real value on the other.
+        fallback = None
         for candidate in candidates:
-            normalized = normalizer(candidate)
-            if normalized:
-                out.values.setdefault(label, normalized)
+            normalized, confident = _apply(normalizer, candidate)
+            if normalized and confident:
+                fallback = (normalized, True)
                 break
+            if normalized and fallback is None:
+                fallback = (normalized, False)
+        if fallback and label not in out.values:
+            out.values[label] = fallback[0]
+            if not fallback[1]:
+                out.uncertain.add(label)
 
     for match in DAMAGE_PAT.finditer(blob):
         token = match.group(0).lower()
@@ -208,14 +228,18 @@ def _parse_sponsor_letter(blob: str, out: PageFields) -> None:
             out.values.setdefault("applicant_name", name)
     match = re.search(r"expected on Earth for (.+?)[.\n]", blob, re.I | re.S)
     if match:
-        purpose = lx.norm_purpose(match.group(1).replace("\n", " "))
-        if purpose:
-            out.values.setdefault("declared_purpose", purpose)
+        purpose, confident = _apply(lx.norm_purpose, match.group(1).replace("\n", " "))
+        if purpose and "declared_purpose" not in out.values:
+            out.values["declared_purpose"] = purpose
+            if not confident:
+                out.uncertain.add("declared_purpose")
     match = re.search(r"class ([A-Z]+-?\d)", blob)
     if match:
-        visa = lx.norm_visa(match.group(1))
-        if visa:
-            out.values.setdefault("visa_class", visa)
+        visa, confident = _apply(lx.norm_visa, match.group(1))
+        if visa and "visa_class" not in out.values:
+            out.values["visa_class"] = visa
+            if not confident:
+                out.uncertain.add("visa_class")
 
 
 _WATERMARK_PAT = re.compile(r"sample\s+denial|sample\s+approval|specimen", re.I)

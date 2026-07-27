@@ -58,24 +58,44 @@ def snap(value: str, vocabulary: tuple[str, ...] | list[str], min_ratio=0.72, ma
     return best
 
 
-def snap_or_raw(value: str, vocabulary, **kw):
-    return snap(value, vocabulary, **kw) or _clean(value) or None
+def _nearest(value: str, vocabulary, floor: float):
+    """Closest entry above a low floor, ignoring the ambiguity margin."""
+    value = _clean(value)
+    if not value:
+        return None
+    key = value.casefold()
+    best_score, best = max(((_ratio(key, v.casefold()), v) for v in vocabulary), default=(0.0, None))
+    return best if best_score >= floor else None
+
+
+def guess(value: str, vocabulary, min_ratio, margin, floor):
+    """Return (value, confident).
+
+    The evaluator scores a wrong extraction and a blank identically, so once the
+    strict match fails there is nothing to lose by naming the nearest entry
+    anyway. The flag tells the rules engine that this reading is a guess, so a
+    guess is never allowed to trigger a denial.
+    """
+    strict = snap(value, vocabulary, min_ratio=min_ratio, margin=margin)
+    if strict:
+        return strict, True
+    return _nearest(value, vocabulary, floor), False
 
 
 def norm_species(value):
     value = _clean(value).upper().replace(" ", "_").replace("-", "_")
     value = re.sub(r"[^A-Z_]", "", value)
-    return snap(value, SPECIES, min_ratio=0.7)
+    return guess(value, SPECIES, min_ratio=0.7, margin=0.06, floor=0.45)
 
 
 def norm_world(value):
-    return snap(_clean(value), WORLDS, min_ratio=0.65)
+    return guess(_clean(value), WORLDS, min_ratio=0.65, margin=0.06, floor=0.45)
 
 
 def norm_purpose(value):
     value = _clean(value).lower()
     value = re.sub(r"[^a-z ]", "", value)
-    return snap(value, PURPOSES, min_ratio=0.65)
+    return guess(value, PURPOSES, min_ratio=0.65, margin=0.06, floor=0.4)
 
 
 def norm_visa(value):
@@ -85,14 +105,14 @@ def norm_visa(value):
     if match:
         prefix = "TRANSIT" if match.group(1).startswith("TRANS") else match.group(1)
         value = f"{prefix}-{match.group(2).translate(_DIGIT_FIX)}"
-    return snap(value, VISA_CLASSES, min_ratio=0.7)
+    return guess(value, VISA_CLASSES, min_ratio=0.7, margin=0.06, floor=0.45)
 
 
 def norm_fee(value):
     value = _clean(value).lower()
     if "[" in value or "obscur" in value or "illegib" in value:
-        return None
-    return snap(value, FEE_STATUSES, min_ratio=0.7)
+        return None, True
+    return guess(value, FEE_STATUSES, min_ratio=0.7, margin=0.06, floor=0.5)
 
 
 def norm_flag(value):

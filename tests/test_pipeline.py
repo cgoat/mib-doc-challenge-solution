@@ -53,11 +53,38 @@ def test_damage_marker_records_the_field_as_unrecoverable():
     ("LUNA_SECUR1D", "LUNA_SECURID"),
 ])
 def test_species_snaps_to_vocabulary(noisy, expected):
-    assert lx.norm_species(noisy) == expected
+    value, confident = lx.norm_species(noisy)
+    assert value == expected
+    assert confident
 
 
 def test_unknown_species_is_not_forced_onto_a_neighbour():
-    assert lx.norm_species("ZZQQXX_NOTREAL") is None
+    assert lx.norm_species("ZZQQXX_NOTREAL") == (None, False)
+
+
+def test_a_marginal_reading_is_reported_but_flagged_as_a_guess():
+    # A wrong extraction and a blank score the same, so naming the nearest
+    # entry is free - as long as the guess is marked.
+    value, confident = lx.norm_species("LN SC")
+    assert value == "LUNA_SECURID"
+    assert not confident
+
+
+def test_a_guess_never_triggers_a_denial():
+    # TRANSIT-7 normally denies outright; a guessed visa class must not.
+    p = _packet(risk_flags="none", fee_status="paid", visa_class="TRANSIT-7",
+                arrival_date="2026-06-01", sponsor_id="SPN-1234")
+    assert adjudicate(p, resolve_fields(p))[0] == "DENIED"
+    p["uncertain"] = ["visa_class"]
+    assert adjudicate(p, resolve_fields(p))[0] == "NEEDS_REVIEW"
+
+
+def test_a_guessed_home_world_does_not_trigger_the_embargo():
+    p = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                home_world="Wolf-1061c", arrival_date="2026-06-01", sponsor_id="SPN-1234")
+    assert adjudicate(p, resolve_fields(p))[0] == "DENIED"
+    p["uncertain"] = ["home_world"]
+    assert adjudicate(p, resolve_fields(p))[0] != "DENIED"
 
 
 def test_impossible_calendar_dates_are_rejected():
@@ -143,8 +170,10 @@ def test_unread_risk_panel_blocks_approval():
     assert reasons[0] == "risk_panel_unread"
 
 
-def test_missing_fee_receipt_defaults_by_visa_class():
-    assert resolve_fields(_packet(visa_class="DIP-1"))["fee_status"] == "waived"
+def test_missing_fee_receipt_defaults_to_paid():
+    # Measured on the labels: among packets with no readable receipt, DIP-1
+    # runs 45 paid to 20 waived, so the manual's waiver language misleads here.
+    assert resolve_fields(_packet(visa_class="DIP-1"))["fee_status"] == "paid"
     assert resolve_fields(_packet(visa_class="XW-2"))["fee_status"] == "paid"
 
 
@@ -179,6 +208,21 @@ def test_batch_reference_ignores_an_ocr_year_blowout():
 def test_no_reference_when_the_batch_is_tiny():
     from mib.rules import batch_reference_date
     assert batch_reference_date([{"arrival_date": "2026-05-01"}]) is None
+
+
+def test_every_parsed_value_is_a_plain_string():
+    # Vocabulary normalizers return (value, confident); leaking that tuple into
+    # the field map silently corrupts the output and the vote tally.
+    pages = [
+        ("sponsor", ["Sponsor SPN-4560 attests that Aridane Zavoss is expected on Earth for",
+                     "reactor maintenance.", "responsibility for class XW-2 compliance"]),
+        ("intake", ["Visa Class: MED-3", "Species Code: LUNA_SECURID", "Purpose: xenobotany"]),
+        ("fee", ["Fee Status: paid", "Waiver Code: N/A"]),
+        ("registry", ["Home World: Luyten-b", "Registry Status: CLEAR"]),
+    ]
+    for kind, lines in pages:
+        for key, value in parse_page(kind, lines, "text").values.items():
+            assert isinstance(value, str), f"{kind}/{key} is {type(value).__name__}"
 
 
 # --- page classification ---------------------------------------------------
