@@ -28,7 +28,7 @@ python -m pytest tests/ -q
 
 ## Score on the public training split
 
-`116.51 / 150` — extraction `40.39/50`, classification `60.72/80`, calibration
+`116.88 / 150` — extraction `40.76/50`, classification `60.72/80`, calibration
 `15.40/20`, no missing cases, 6 catastrophic false approvals out of 431 denials.
 Measured with the challenge's own `scripts/evaluate.py`.
 
