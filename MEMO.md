@@ -191,17 +191,33 @@ in-sample 0.114 is optimistic.
 
 ## What I would do with another week
 
-1. **A recogniser fine-tuned on these fonts.** The engine swap showed how much
-   was left on the table in recognition alone, and I have since ruled out the
-   two off-the-shelf upgrades. Swapping the Chinese recogniser for the English
-   one (`en_PP-OCRv3_rec`) is a wash at -0.07 extraction points: the closed
-   vocabularies already absorb the charset advantage. The PP-OCRv4 *server*
-   models fit the size limits (113 MB + 90 MB) but take **533 s for a single
-   page** on one CPU thread, roughly a thousand times over budget. What is left
-   is fine-tuning: the generator uses a handful of fonts at known sizes, so
-   synthetic renders with the same degradations would give unlimited training
-   data for a task-specific recogniser that would fit the artifact limits
-   easily.
+1. **Not a task-specific recogniser — I tried it and it lost.** The obvious next
+   step looked like training on this generator's output, and the data comes free:
+   `train_labels.csv` gives the true value for every field, the detector gives
+   the line box, so 3,155 genuinely-degraded line crops can be harvested with
+   exact labels and no annotation. For the closed-vocabulary fields the target is
+   a *class*, not a character sequence, which is a far easier problem — 12 species
+   codes rather than arbitrary text. I trained a small CNN per field on a GPU,
+   splitting by packet so no case straddled the split.
+
+   It lost on every field, against the same held-out packets:
+
+   | Field | Trained classifier | PP-OCR + vocabulary snapping |
+   | --- | ---: | ---: |
+   | species_code | 81.7% | **98.3%** |
+   | home_world | 68.6% | **92.8%** |
+   | visa_class | 54.8% | **81.7%** |
+   | declared_purpose | 54.1% | **85.9%** |
+   | fee_status | 64.7% | **70.8%** |
+
+   The ceiling is data volume: ~500-900 crops per field is roughly 50 examples
+   per class, against a recogniser pretrained on millions of images. This does
+   not prove the idea is unworkable — genuine fine-tuning from the PP-OCR weights,
+   or synthetic renders in the four fonts the generator uses (Helvetica,
+   Helvetica-Bold, Times-Roman, Helvetica-Oblique) to lift the volume, could
+   still clear the bar. But it does mean the cheap version of the idea is dead,
+   and I would want that volume problem solved before spending more on it.
+
 2. **Train a small character classifier on the rendered fonts.** The generator
    uses a handful of fonts at known sizes; a few-hundred-KB CNN over segmented
    glyphs would likely beat Tesseract on this specific degradation, and fits the
