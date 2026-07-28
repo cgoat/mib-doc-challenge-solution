@@ -7,6 +7,8 @@ connected components, group them into text lines, and OCR one line at a time.
 """
 from __future__ import annotations
 
+import os
+
 import cv2
 import fitz
 import numpy as np
@@ -145,7 +147,45 @@ def _wordiness(img) -> int:
     return sum(text.count(anchor) for anchor in _ANCHORS)
 
 
-def ocr_page(img) -> list[str]:
+_ENGINE = None
+
+
+def _rapid_engine():
+    """Lazily load the ONNX detector/recogniser once per worker process."""
+    global _ENGINE
+    if _ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+        # One packet per process already saturates the CPUs; left to itself
+        # ONNX Runtime opens a full thread pool per worker and they thrash.
+        _ENGINE = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
+    return _ENGINE
+
+
+def ocr_page_rapid(img) -> list[str]:
+    """Detect and read text with PP-OCR.
+
+    Its detector finds text boxes directly, so none of the glyph-masking,
+    line-grouping or orientation machinery below is needed - and it reads the
+    degraded type markedly better than line-at-a-time Tesseract.
+    """
+    try:
+        result, _elapsed = _rapid_engine()(img)
+    except Exception:
+        return []
+    if not result:
+        return []
+    placed = []
+    for box, text, _score in result:
+        if not text or not text.strip():
+            continue
+        ys = [point[1] for point in box]
+        xs = [point[0] for point in box]
+        placed.append((round(min(ys), 1), round(min(xs), 1), text.strip()))
+    placed.sort()
+    return [text for _y, _x, text in placed]
+
+
+def ocr_page_tesseract(img) -> list[str]:
     img = orient(img)
     mask, med_h = glyph_mask(img)
     lines = find_lines(mask, med_h)
@@ -174,3 +214,9 @@ def ocr_page(img) -> list[str]:
         if text:
             texts.append(text)
     return texts
+
+
+def ocr_page(img) -> list[str]:
+    if os.environ.get("MIB_OCR_ENGINE", "rapid") == "tesseract":
+        return ocr_page_tesseract(img)
+    return ocr_page_rapid(img)

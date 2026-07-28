@@ -8,10 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# RapidOCR carries the PP-OCRv4 mobile ONNX models inside the wheel (16 MB
+# total), so nothing is fetched at runtime. Tesseract stays as the fallback
+# engine and keeps the A/B switch in mib/ocr.py reproducible.
 RUN pip install --no-cache-dir \
         PyMuPDF==1.24.10 \
         opencv-python-headless==4.10.0.84 \
         pytesseract==0.3.13 \
+        rapidocr-onnxruntime==1.4.4 \
+        onnxruntime==1.20.1 \
         numpy==1.26.4
 
 WORKDIR /app

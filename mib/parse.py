@@ -82,8 +82,10 @@ def _find_label_span(line: str):
         for start in range(0, len(tokens) - size + 1):
             window_tokens = tokens[start:start + size]
             # A label is words only; a window that swallows the value would be
-            # scored on its alphabetic remainder and win spuriously.
-            if any(re.search(r"\d", t) for t in window_tokens):
+            # scored on its alphabetic remainder and win spuriously. Damage
+            # markers are excluded too: "[NAME CUT OUT]" must not be read as
+            # part of the label "applicant name".
+            if any(re.search(r"[\d\[\]]", t) for t in window_tokens):
                 continue
             name, score = _score_label(" ".join(window_tokens))
             # Longest span wins: "Fee" alone would otherwise beat "Fee Status"
@@ -213,7 +215,21 @@ def _apply(normalizer, text):
     return result if isinstance(result, tuple) else (result, True)
 
 
+def _respace(line: str) -> str:
+    """Restore word gaps the recogniser dropped.
+
+    PP-OCR emits a detected box as one token, so "Visa Class: MED-3" comes back
+    as "VisaClass:MED-3". Splitting on the colon and on lower-to-upper
+    transitions gives the label matcher something to tokenise.
+    """
+    line = re.sub(r"[:：]", " : ", line)
+    line = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", line)
+    return re.sub(r"\s+", " ", line).strip()
+
+
 def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
+    if source == "ocr":
+        lines = [_respace(l) for l in lines]
     out = PageFields(kind=kind, source=source)
     blob = "\n".join(lines)
 
