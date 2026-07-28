@@ -68,3 +68,9 @@ python tools/score_cache.py <train_labels.csv> /tmp/train_cache.jsonl      # sco
 `mib/lexicon.json` holds the closed vocabularies (species codes, home worlds,
 visa classes, purposes, risk flags, and the name-part lists) read off the same
 labels. Nothing is keyed to a case id or a filename.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The challenge repository and its public dataset
+are MIT-licensed too; the PP-OCRv4 models shipped inside
+`rapidocr-onnxruntime` are Apache 2.0.
