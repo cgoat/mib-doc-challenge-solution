@@ -4,8 +4,8 @@ Reads a directory of MIB intake packet PDFs and writes `predictions.jsonl`:
 extracted applicant record plus an `APPROVED` / `DENIED` / `NEEDS_REVIEW`
 adjudication and a calibrated confidence.
 
-No network, no API keys, no LLM. Classical CV + Tesseract + a rules engine, plus
-one small logistic model (26 weights, ~2 KB) fitted on the public training split
+No network, no API keys, no LLM. PP-OCRv4 via ONNX Runtime + classical CV + a rules engine, plus
+one small logistic model (27 weights, ~2 KB) fitted on the public training split
 for confidence calibration.
 
 ## Run it
@@ -28,8 +28,8 @@ python -m pytest tests/ -q
 
 ## Score on the public training split
 
-`116.88 / 150` — extraction `40.76/50`, classification `60.72/80`, calibration
-`15.40/20`, no missing cases, 6 catastrophic false approvals out of 431 denials.
+`120.29 / 150` — extraction `42.55/50`, classification `62.01/80`, calibration
+`15.73/20`, no missing cases, 8 catastrophic false approvals out of 431 denials.
 Measured with the challenge's own `scripts/evaluate.py`.
 
 ## How it works
@@ -37,7 +37,7 @@ Measured with the challenge's own `scripts/evaluate.py`.
 | Module | Responsibility |
 | --- | --- |
 | `mib/pages.py` | Splits each page's text layer into trusted visible spans and untrusted hidden ones; classifies the page kind |
-| `mib/ocr.py` | Reads scanned pages: orientation, line segmentation, per-line deskew, line-at-a-time OCR |
+| `mib/ocr.py` | Reads scanned pages with PP-OCRv4; the older Tesseract line-at-a-time path is kept behind `MIB_OCR_ENGINE` |
 | `mib/parse.py` | Turns page lines into typed field candidates, in either column layout |
 | `mib/lexicon.py` | Snaps noisy OCR to the closed vocabularies, with a distance threshold so unseen values pass through |
 | `mib/document.py` | Merges page evidence into one packet record, weighted by the field manual's precedence |
