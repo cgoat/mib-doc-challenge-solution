@@ -1,8 +1,8 @@
 # MIB Doc Challenge — technical memo
 
 **Score on the public training split (challenge `scripts/evaluate.py`):**
-`121.09 / 150` — extraction `42.55/50`, classification `62.52/80`, calibration
-`16.02/20`, 0 missing cases, 8 catastrophic false approvals against 431 true
+`121.60 / 150` — extraction `42.55/50`, classification `63.00/80`, calibration
+`16.05/20`, 0 missing cases, 8 catastrophic false approvals against 431 true
 denials. Runtime 0.55 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
 
 No LLM, no network, no API keys. PyMuPDF for the text layer, PP-OCRv4 via ONNX
@@ -118,6 +118,29 @@ same pattern before changing anything - they deny DIP-1 packets uniformly
 I also re-swept the staleness threshold against the corrected policy in case
 the interaction shifted the optimum; 240 days is still the peak (62.52),
 confirming that channel is exhausted rather than just untried.
+
+**A field I had extracted but never used.** `registry_status` was on the
+`Packet` object and reached the dev cache tool, but `main.py`'s runtime record
+never included it - the signal was inert in the shipped image. Its
+`EMBARGO REVIEW` value turned out to be a direct, registry-verified check that
+denies regardless of visa class (DIP-1 packets carrying it are 7/9 denied, not
+the clean split the home-world-name embargo gets), and it names worlds beyond
+Wolf-1061c (`TRAPPIST-1e`, `Eris Relay` both appear). Wiring it in and testing
+both a DIP-1-exempt and a uniform version before choosing: uniform wins, +0.40
+against +0.29. Classification 62.52 -> 63.00, total 121.09 -> 121.60.
+
+**A rule I measured, believed, and reverted.** The manual: `waived` is
+acceptable "only for DIP-1 or a visible hardship waiver" - and no training
+packet ever prints "hardship", so a non-DIP-1 waiver looked like it should be
+at least a review trigger. Stripped of every other denial reason, those
+packets do split 46 review / 37 approved / 10 denied, which reads like a
+real signal. But the *marginal* population - packets the existing rules
+already approve, that this one would newly flip to review - is only 55, and
+67% of those are truth `APPROVED`, because rules already covering the
+review-flag and fee-unknown cases had already caught the ones that needed
+catching. Net effect: -1.05 points. The lesson worth keeping is to isolate
+the marginal population a rule change actually touches before trusting the
+label distribution of the population matching its *condition*.
 
 The public manual covers most of it; the rest I read off the training packets'
 own adjudicator notes, which cite their reasons in plain text. That surfaced two
