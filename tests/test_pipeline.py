@@ -225,6 +225,14 @@ def test_every_parsed_value_is_a_plain_string():
             assert isinstance(value, str), f"{kind}/{key} is {type(value).__name__}"
 
 
+def test_cpu_budget_is_sane():
+    # Must never return 0 (no workers) and must not trust a host CPU count
+    # blindly when a cgroup quota is present.
+    from mib.main import _cpu_budget
+    budget = _cpu_budget()
+    assert isinstance(budget, int) and budget >= 1
+
+
 # --- page classification ---------------------------------------------------
 
 def test_classifies_a_badly_ocrd_intake_title():
