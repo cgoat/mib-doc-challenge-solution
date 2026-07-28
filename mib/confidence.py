@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 
 REASON_HEADS = (
-    "adjudicator_note", "disqualifying_flag", "embargo_home_world", "revoked_sponsor",
+    "adjudicator_note", "disqualifying_flag", "registry_embargo_review", "embargo_home_world", "revoked_sponsor",
     "transit_cannot_authorize_work", "fee_unpaid", "stale_arrival_date",
     "arrival_date_missing", "fee_unknown",
     "review_flag", "sponsor_missing", "damaged", "visa_class_missing", "multiple_applicants",

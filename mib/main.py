@@ -106,7 +106,8 @@ def _predict_one(args) -> dict:
             "damaged": sorted(packet.damaged), "uncertain": sorted(packet.uncertain),
             "kinds": packet.kinds, "sources": packet.sources,
             "note_adjudication": packet.note_adjudication, "notes": packet.notes,
-            "waiver_codes": packet.waiver_codes, "page_count": packet.page_count,
+            "waiver_codes": packet.waiver_codes, "registry_status": packet.registry_status,
+            "page_count": packet.page_count,
             "ocr_pages": packet.ocr_pages, "multi_applicant": packet.multi_applicant,
             "injection": packet.injection,
         }

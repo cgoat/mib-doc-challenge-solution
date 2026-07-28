@@ -128,6 +128,14 @@ def adjudicate(packet: dict, fields: dict, reference_date=None) -> tuple[str, li
     if disqualifying:
         return "DENIED", [f"disqualifying_flag:{','.join(sorted(disqualifying))}"]
 
+    # The registry extract's own status line is a direct verified check, not an
+    # inference from which world the applicant claims - and unlike the embargo
+    # inferred from a home-world name match, it is not softened for DIP-1: those
+    # packets deny 7/9 of the time here versus splitting cleanly for the
+    # home-world case, so exempting them cost more than it saved when measured.
+    if packet.get("registry_status") == "EMBARGO REVIEW":
+        return "DENIED", ["registry_embargo_review"]
+
     visa = trusted("visa_class")
     sponsor = trusted("sponsor_id")
 

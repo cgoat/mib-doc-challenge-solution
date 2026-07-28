@@ -150,6 +150,23 @@ def test_embargo_and_revoked_sponsor_still_bind_non_diplomatic_packets():
     assert adjudicate(revoked, resolve_fields(revoked))[0] == "DENIED"
 
 
+def test_registry_embargo_review_denies_regardless_of_visa_class():
+    # A direct registry-verified embargo status, unlike a home-world name match,
+    # is not softened for DIP-1: measured on the labels those split 7 denied to
+    # 2 review, not the clean home-world-embargo split.
+    p = _packet(risk_flags="none", fee_status="waived", visa_class="DIP-1",
+                arrival_date="2026-01-01", sponsor_id="SPN-1234")
+    p["registry_status"] = "EMBARGO REVIEW"
+    assert adjudicate(p, resolve_fields(p))[0] == "DENIED"
+
+
+def test_registry_clear_status_is_not_a_signal():
+    p = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                arrival_date="2026-01-01", sponsor_id="SPN-1234")
+    p["registry_status"] = "CLEAR"
+    assert adjudicate(p, resolve_fields(p))[0] == "APPROVED"
+
+
 def test_disqualifying_flag_denies():
     p = _packet(risk_flags="biohazard_red", fee_status="paid", visa_class="MED-3",
                 arrival_date="2026-01-01", sponsor_id="SPN-1234")
