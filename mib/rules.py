@@ -128,14 +128,23 @@ def adjudicate(packet: dict, fields: dict, reference_date=None) -> tuple[str, li
     if disqualifying:
         return "DENIED", [f"disqualifying_flag:{','.join(sorted(disqualifying))}"]
 
-    if trusted("home_world") in EMBARGO_WORLDS:
-        return "DENIED", ["embargo_home_world"]
-
-    sponsor = trusted("sponsor_id")
-    if sponsor in REVOKED_SPONSORS:
-        return "DENIED", ["revoked_sponsor"]
-
     visa = trusted("visa_class")
+    sponsor = trusted("sponsor_id")
+
+    # Embargo and sponsor-revocation are checks on a work authorization, and a
+    # DIP-1 packet is not one: the manual says a sponsor is only required
+    # "unless they are applying under DIP-1", and the training labels bear the
+    # same shape for the embargo - every non-DIP-1 Wolf-1061c packet is denied
+    # (51/51) while DIP-1 ones split 11 approved / 10 review / 5 denied on
+    # other grounds. Denying a diplomatic packet outright on either one was
+    # costing 8 raw points per case with no packet actually requiring it.
+    if visa != "DIP-1":
+        if trusted("home_world") in EMBARGO_WORLDS:
+            return "DENIED", ["embargo_home_world"]
+
+        if sponsor in REVOKED_SPONSORS:
+            return "DENIED", ["revoked_sponsor"]
+
     if visa == "TRANSIT-7":
         return "DENIED", ["transit_cannot_authorize_work"]
 

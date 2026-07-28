@@ -127,6 +127,29 @@ def _packet(**fields):
     return base
 
 
+def test_embargo_and_revoked_sponsor_do_not_bind_diplomatic_packets():
+    # The manual: a sponsor is required "unless applying under DIP-1". The
+    # embargo shows the same shape in the training labels - every non-DIP-1
+    # Wolf-1061c packet is denied (51/51) while DIP-1 ones are not.
+    embargoed = _packet(risk_flags="none", fee_status="waived", visa_class="DIP-1",
+                        home_world="Wolf-1061c", arrival_date="2026-01-01", sponsor_id="SPN-1234")
+    assert adjudicate(embargoed, resolve_fields(embargoed))[0] != "DENIED"
+
+    revoked = _packet(risk_flags="none", fee_status="waived", visa_class="DIP-1",
+                      arrival_date="2026-01-01", sponsor_id="SPN-0007")
+    assert adjudicate(revoked, resolve_fields(revoked))[0] != "DENIED"
+
+
+def test_embargo_and_revoked_sponsor_still_bind_non_diplomatic_packets():
+    embargoed = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                        home_world="Wolf-1061c", arrival_date="2026-01-01", sponsor_id="SPN-1234")
+    assert adjudicate(embargoed, resolve_fields(embargoed))[0] == "DENIED"
+
+    revoked = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
+                      arrival_date="2026-01-01", sponsor_id="SPN-0007")
+    assert adjudicate(revoked, resolve_fields(revoked))[0] == "DENIED"
+
+
 def test_disqualifying_flag_denies():
     p = _packet(risk_flags="biohazard_red", fee_status="paid", visa_class="MED-3",
                 arrival_date="2026-01-01", sponsor_id="SPN-1234")
