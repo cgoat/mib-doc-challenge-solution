@@ -192,10 +192,16 @@ in-sample 0.114 is optimistic.
 ## What I would do with another week
 
 1. **A recogniser fine-tuned on these fonts.** The engine swap showed how much
-   was left on the table in recognition alone; the generator uses a handful of
-   fonts at known sizes, so fine-tuning the PP-OCR recogniser on synthetic
-   renders of them should beat the general model, and would fit the artifact
-   limits easily. I would try this before anything else.
+   was left on the table in recognition alone, and I have since ruled out the
+   two off-the-shelf upgrades. Swapping the Chinese recogniser for the English
+   one (`en_PP-OCRv3_rec`) is a wash at -0.07 extraction points: the closed
+   vocabularies already absorb the charset advantage. The PP-OCRv4 *server*
+   models fit the size limits (113 MB + 90 MB) but take **533 s for a single
+   page** on one CPU thread, roughly a thousand times over budget. What is left
+   is fine-tuning: the generator uses a handful of fonts at known sizes, so
+   synthetic renders with the same degradations would give unlimited training
+   data for a task-specific recogniser that would fit the artifact limits
+   easily.
 2. **Train a small character classifier on the rendered fonts.** The generator
    uses a handful of fonts at known sizes; a few-hundred-KB CNN over segmented
    glyphs would likely beat Tesseract on this specific degradation, and fits the
