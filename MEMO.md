@@ -1,9 +1,9 @@
 # MIB Doc Challenge — technical memo
 
 **Score on the public training split (challenge `scripts/evaluate.py`):**
-`120.29 / 150` — extraction `42.55/50`, classification `62.01/80`, calibration
-`15.73/20`, 0 missing cases, 8 catastrophic false approvals against 431 true
-denials. Runtime 1.00 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
+`121.09 / 150` — extraction `42.55/50`, classification `62.52/80`, calibration
+`16.02/20`, 0 missing cases, 8 catastrophic false approvals against 431 true
+denials. Runtime 0.55 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
 
 No LLM, no network, no API keys. PyMuPDF for the text layer, PP-OCRv4 via ONNX
 Runtime for scans, a hand-written policy engine, and one 27-weight logistic
@@ -59,7 +59,7 @@ than every other change I made combined:
 | Extraction | 40.69 | **42.55** |
 | Classification | 60.68 | **62.01** |
 | Adjudication accuracy | 69.8% | **72.1%** |
-| Total | 116.71 | **120.29** |
+| Total | 116.71 | **120.29** (later 121.09 with a policy fix; see below) |
 
 The per-field gains land exactly where the old pipeline was weakest —
 `sponsor_id` 65.8 → 78.7%, `arrival_date` 78.9 → 87.9%, `visa_class` 80.4 →
@@ -98,6 +98,26 @@ from a regex rather than a vocabulary — sponsor id, dates — have no meaningf
 "nearest" reading and stay strict.
 
 ## The adjudication policy
+
+**A policy gap found by looking at where extraction was already correct.**
+After the engine swap I went looking for cases where the extracted fields
+matched the labels exactly and the packet was *still* adjudicated wrong - that
+isolates a pure policy bug from an extraction one. Several were denied on
+`revoked_sponsor` or `embargo_home_world` with a correctly-read `DIP-1` visa.
+
+The manual states a sponsor is required "unless they are applying under
+DIP-1" - a diplomatic packet has no work-authorization sponsor relationship to
+revoke in the first place. The training labels show the same shape for the
+embargo, which the manual doesn't state explicitly: every non-DIP-1
+Wolf-1061c packet is denied (51/51), while DIP-1 ones split 11 approved / 10
+review / 5 denied on other grounds. I checked disqualifying risk flags for the
+same pattern before changing anything - they deny DIP-1 packets uniformly
+(34/34) and are correctly left alone. Fixing the other two: classification
+62.01 -> 62.52, calibration 15.73 -> 16.02 on refit, total 120.29 -> 121.09.
+
+I also re-swept the staleness threshold against the corrected policy in case
+the interaction shifted the optimum; 240 days is still the peak (62.52),
+confirming that channel is exhausted rather than just untried.
 
 The public manual covers most of it; the rest I read off the training packets'
 own adjudicator notes, which cite their reasons in plain text. That surfaced two
