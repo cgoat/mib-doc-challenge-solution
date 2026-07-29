@@ -341,6 +341,40 @@ in-sample 0.114 is optimistic.
    trades into is the wrong shape for evidence that's structurally missing
    rather than merely unresolved, and the gain does not survive outside that
    one bucket.
+6. **Generic OCR preprocessing before PP-OCR — tested, not shipped.** The
+   Tesseract fallback path does real preprocessing (deskew, glyph-footprint
+   masking, contrast stretch, upscaling); the shipped RapidOCR path hands it
+   the raw decoded image with none of that, on the theory that PP-OCR's own
+   detector already handles it. I checked that theory on the 40 packets where
+   a closed-vocabulary field (`declared_purpose`, `home_world`, `species_code`)
+   was never recovered at all, comparing whether the ground-truth value showed
+   up anywhere in the raw OCR output (fuzzy substring match) before vs. after
+   preprocessing the image:
+   - Upscale (2x cubic) + CLAHE contrast enhancement: **8/40 recall either
+     way** — some individual cases flip, but it nets to zero.
+   - Adding median-blur + non-local-means denoising on top: **recall dropped
+     to 2/40** — actively harmful. The denoising smooths away exactly the
+     fine glyph-stroke edges PP-OCR's recognizer depends on at this
+     resolution.
+   Neither variant shipped. The 70% of cases (28/40) that failed under every
+   variant tested look like genuine information loss in the synthetic
+   generator's degradation, not something a preprocessing pass can restore -
+   consistent with the earlier fine-tuning result, which also found the
+   off-the-shelf pretrained recognizer close to the ceiling this corpus
+   allows. A real gain here would need image *restoration* (a learned
+   super-resolution/denoising model trained on this exact degradation, not a
+   generic OpenCV filter), which is out of scope for the time available.
+
+## Committed, not yet shipped
+
+`parse.py`'s `_recover_fee_status_by_scan` (see commit history) recovers
+`fee_status` when its own two-word label is too OCR-garbled to match but the
+four-word value vocabulary still snaps cleanly - always marked uncertain, so
+it is pure extraction upside with zero adjudication risk. Measured on a full
+cache rebuild: 10 of 54 previously-blank reads now correct, 0 regressions,
+extraction 42.55 -> 42.57/50. Not yet pushed through the Docker/validation/PR
+cycle since the score movement (+0.01/150) doesn't justify a rebuild on its
+own; held to batch with the next change that does.
 
 ## Reproducing
 
