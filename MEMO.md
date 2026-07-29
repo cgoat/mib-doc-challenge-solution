@@ -254,21 +254,46 @@ in-sample 0.114 is optimistic.
    | fee_status | 64.7% | **70.8%** |
 
    The ceiling is data volume: ~500-900 crops per field is roughly 50 examples
-   per class, against a recogniser pretrained on millions of images. This does
-   not prove the idea is unworkable — genuine fine-tuning from the PP-OCR weights,
-   or synthetic renders in the four fonts the generator uses (Helvetica,
-   Helvetica-Bold, Times-Roman, Helvetica-Oblique) to lift the volume, could
-   still clear the bar. But it does mean the cheap version of the idea is dead,
-   and I would want that volume problem solved before spending more on it.
+   per class, against a recogniser pretrained on millions of images.
 
-2. **Train a small character classifier on the rendered fonts.** The generator
-   uses a handful of fonts at known sizes; a few-hundred-KB CNN over segmented
-   glyphs would likely beat Tesseract on this specific degradation, and fits the
-   250 MiB artefact limit comfortably.
-3. **Multi-hypothesis OCR with vocabulary-constrained decoding.** Keep Tesseract's
+   **I then tried the follow-up this pointed at, and it also lost.** Genuine
+   CTC fine-tuning from the PP-OCRv4 pretrained weights (not from scratch),
+   on 80,000 synthetic line crops rendered in the generator's four fonts
+   (Helvetica, Helvetica-Bold, Times-Roman, Helvetica-Oblique) plus 3,839 real
+   crops harvested the same label-free way as the classifier attempt, using
+   real train-packet pages this time so the transcription is exact rather than
+   guessed. Training itself worked — 91.0% exact-match accuracy on a held-out
+   slice of that data after 12 epochs on a GPU — but measured end to end on
+   150 packets held out of *both* the crop harvest and training, against the
+   same off-the-shelf pretrained model:
+
+   | Field | Fine-tuned | PP-OCR (shipped) |
+   | --- | ---: | ---: |
+   | declared_purpose | 81.2% | **84.6%** |
+   | sponsor_id | 78.5% | **81.2%** |
+   | home_world | 88.6% | **90.6%** |
+   | risk_flags | 73.2% | **74.5%** |
+   | species_code | 94.6% | **95.3%** |
+   | **Extraction points** | 42.09 | **42.57** |
+
+   It lost on 7 of 9 fields net -0.48 points, despite 91% accuracy on its own
+   validation split. The 91% figure was measured on data drawn 95% from my own
+   synthetic renderer, so it mostly says the model learned my degradation
+   pipeline, not the real one — degrading the model's general-purpose
+   robustness in exchange for specializing on a reconstruction that doesn't
+   quite match the actual generator. This is exactly the risk I flagged before
+   starting ("I would be training against my reconstruction... not the real
+   one") and built the 150-packet holdout specifically to catch; it caught it.
+   I did not ship this model. Rebuilding it with the real-to-synthetic ratio
+   inverted (thousands more genuine crops, a smaller synthetic share used only
+   to fill vocabulary gaps) is the one variant of this idea I haven't
+   falsified, but at that point the honest framing is "collect more real
+   labelled data," not "fine-tune the model."
+
+2. **Multi-hypothesis OCR with vocabulary-constrained decoding.** Keep PP-OCR's
    top-N per line and score candidates against the closed vocabularies, rather
    than snapping a single noisy string after the fact.
-4. **Per-field confidence, not just per-decision.** Extraction is scored per
+3. **Per-field confidence, not just per-decision.** Extraction is scored per
    field; knowing which fields are shaky would let me choose between emitting a
    low-confidence reading and leaving it blank.
 5. **Cross-validate the policy constants.** The revoked-sponsor and embargo lists
