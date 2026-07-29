@@ -341,6 +341,21 @@ in-sample 0.114 is optimistic.
    trades into is the wrong shape for evidence that's structurally missing
    rather than merely unresolved, and the gain does not survive outside that
    one bucket.
+
+   I then tried the narrower version this points at: scope the classifier to
+   only the `risk_panel_unread` bucket (the sole source of signal), and gate
+   an APPROVED override behind a confidence threshold on `P(APPROVED)` so a
+   marginal call falls back to the rule's own conservative default instead of
+   the model's raw expected-value pick. At threshold 0.75 and one fold split
+   this looked like a real, contained win: +0.47/150, catastrophic false
+   approvals only 6 -> 7. But rerunning the same threshold across five
+   different 5-fold splits gave +0.47, -0.18, +0.41, -0.21, +0.05 - averaging
+   to essentially zero, with false approvals elevated (6 to 13) in every
+   split regardless of sign. The 207-example bucket is too small for a stable
+   estimate at this granularity: the first split's good number was fold-split
+   luck, not signal. Not shipped in any form - unrestricted, scoped, or
+   confidence-gated all fail the same honesty check once measured against
+   more than one random split.
 6. **Generic OCR preprocessing before PP-OCR — tested, not shipped.** The
    Tesseract fallback path does real preprocessing (deskew, glyph-footprint
    masking, contrast stretch, upscaling); the shipped RapidOCR path hands it
