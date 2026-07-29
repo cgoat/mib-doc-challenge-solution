@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mib import lexicon as lx
 from mib.pages import classify_kind
 from mib.parse import parse_page
-from mib.rules import adjudicate, resolve_fields
+from mib.rules import adjudicate, batch_revoked_sponsors, resolve_fields
 
 
 # --- layout handling -------------------------------------------------------
@@ -148,6 +148,25 @@ def test_embargo_and_revoked_sponsor_still_bind_non_diplomatic_packets():
     revoked = _packet(risk_flags="none", fee_status="paid", visa_class="XW-2",
                       arrival_date="2026-01-01", sponsor_id="SPN-0007")
     assert adjudicate(revoked, resolve_fields(revoked))[0] == "DENIED"
+
+
+def test_batch_revoked_sponsors_flags_frequency_outliers_beyond_the_public_list():
+    # A sponsor the manual never named still looks revoked if the batch
+    # itself denies it every time it appears - it recurs far more than an
+    # ordinary sponsor does.
+    field_sets = [{"sponsor_id": f"SPN-{i:04d}"} for i in range(500)]
+    field_sets += [{"sponsor_id": "SPN-9999"}] * 20
+    revoked = batch_revoked_sponsors(field_sets)
+    assert "SPN-9999" in revoked
+    assert "SPN-0007" in revoked  # public list always included
+
+
+def test_batch_revoked_sponsors_falls_back_below_minimum_corpus_size():
+    field_sets = [{"sponsor_id": f"SPN-{i:04d}"} for i in range(10)]
+    field_sets += [{"sponsor_id": "SPN-9999"}] * 5
+    revoked = batch_revoked_sponsors(field_sets)
+    assert "SPN-9999" not in revoked
+    assert "SPN-0007" in revoked
 
 
 def test_registry_embargo_review_denies_regardless_of_visa_class():

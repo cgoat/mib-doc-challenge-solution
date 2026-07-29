@@ -5,7 +5,7 @@ import csv, json, sys, collections
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mib.rules import adjudicate, batch_reference_date, resolve_fields
+from mib.rules import adjudicate, batch_reference_date, batch_revoked_sponsors, resolve_fields
 from mib.confidence import confidence_for
 
 FIELDS = ["applicant_name","species_code","home_world","visa_class","sponsor_id",
@@ -31,6 +31,7 @@ def main():
 
     resolved = [(rec, resolve_fields(rec)) for rec in recs]
     reference = batch_reference_date([f for _, f in resolved])
+    revoked_sponsors = batch_revoked_sponsors([f for _, f in resolved])
 
     ext_raw = ext_max = cls_raw = 0.0
     briers = []
@@ -41,7 +42,7 @@ def main():
         t = truth.get(rec["case_id"])
         if not t:
             continue
-        adj, reasons = adjudicate(rec, fields, reference_date=reference)
+        adj, reasons = adjudicate(rec, fields, reference_date=reference, revoked_sponsors=revoked_sponsors)
         conf = confidence_for(rec, fields, adj, reasons)
 
         for f in FIELDS:

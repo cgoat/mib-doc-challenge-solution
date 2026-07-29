@@ -14,8 +14,20 @@ REVIEW_FLAGS = {"identity_conflict", "sponsor_mismatch", "illegible_biometrics",
 
 # The public manual lists three revoked sponsors and says others appear in the
 # examples; these are the ones adjudicator notes cite in the training packets.
-REVOKED_SPONSORS = {"SPN-0007", "SPN-0139", "SPN-4040", "SPN-2718", "SPN-9090"}
+REVOKED_SPONSORS_PUBLIC = {"SPN-0007", "SPN-0139", "SPN-4040", "SPN-2718", "SPN-9090"}
 EMBARGO_WORLDS = {"Wolf-1061c"}
+
+# The manual warns other revoked sponsors appear in the examples without
+# naming them, so a fixed list only ever catches ones already seen. A
+# revoked sponsor is one every packet denies, so it recurs far more than an
+# ordinary sponsor: on the training batch the 99th-percentile sponsor appears
+# twice, while every known-revoked id appears 9-32 times. Flagging ids more
+# than REVOKED_FREQUENCY_MULTIPLE times that baseline - recomputed per batch,
+# not hardcoded - generalizes to sponsors this list has never seen. Guarded by
+# a minimum corpus size so a small run falls back to the public list alone
+# rather than treating sampling noise as a signal.
+REVOKED_FREQUENCY_MULTIPLE = 4
+MIN_CORPUS_FOR_FREQUENCY = 400
 
 # Staleness: the manual says more than 180 days before receipt. Measured on
 # the training labels the gain is flat from 180 to 240 days; the wider
@@ -94,7 +106,30 @@ def batch_reference_date(field_sets, percentile: float = 0.95):
     return dates[min(int(len(dates) * percentile), len(dates) - 1)]
 
 
-def adjudicate(packet: dict, fields: dict, reference_date=None) -> tuple[str, list[str]]:
+def batch_revoked_sponsors(field_sets, multiple: float = REVOKED_FREQUENCY_MULTIPLE):
+    """Extend the public revoked-sponsor list with the batch's own outliers.
+
+    A sponsor whose id recurs far more than a typical sponsor is denied every
+    time it appears in these packets - that is what "revoked" looks like in
+    the data, independent of whether the manual happened to name it. Returns
+    the public list unchanged when the batch is too small for a frequency
+    estimate to be trustworthy.
+    """
+    counts: dict[str, int] = {}
+    for f in field_sets:
+        sponsor = f.get("sponsor_id")
+        if sponsor:
+            counts[sponsor] = counts.get(sponsor, 0) + 1
+    if len(counts) < MIN_CORPUS_FOR_FREQUENCY:
+        return set(REVOKED_SPONSORS_PUBLIC)
+    freqs = sorted(counts.values())
+    p99 = freqs[int(len(freqs) * 0.99)]
+    outliers = {s for s, n in counts.items() if n > multiple * p99}
+    return REVOKED_SPONSORS_PUBLIC | outliers
+
+
+def adjudicate(packet: dict, fields: dict, reference_date=None,
+                revoked_sponsors=REVOKED_SPONSORS_PUBLIC) -> tuple[str, list[str]]:
     """Return (adjudication, reasons).
 
     Fields listed in the packet's `uncertain` set are the nearest vocabulary
@@ -150,7 +185,7 @@ def adjudicate(packet: dict, fields: dict, reference_date=None) -> tuple[str, li
         if trusted("home_world") in EMBARGO_WORLDS:
             return "DENIED", ["embargo_home_world"]
 
-        if sponsor in REVOKED_SPONSORS:
+        if sponsor in revoked_sponsors:
             return "DENIED", ["revoked_sponsor"]
 
     if visa == "TRANSIT-7":

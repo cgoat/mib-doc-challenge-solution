@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mib.confidence import features
-from mib.rules import adjudicate, batch_reference_date, resolve_fields
+from mib.rules import adjudicate, batch_reference_date, batch_revoked_sponsors, resolve_fields
 
 L2 = 1.0
 STEPS = 4000
@@ -25,12 +25,13 @@ def build(truth_path, cache_path):
     records = [json.loads(line) for line in open(cache_path)]
     resolved = [(rec, resolve_fields(rec)) for rec in records]
     reference = batch_reference_date([f for _, f in resolved])
+    revoked_sponsors = batch_revoked_sponsors([f for _, f in resolved])
     rows, labels = [], []
     for rec, fields in resolved:
         gold = truth.get(rec["case_id"])
         if not gold:
             continue
-        adj, reasons = adjudicate(rec, fields, reference_date=reference)
+        adj, reasons = adjudicate(rec, fields, reference_date=reference, revoked_sponsors=revoked_sponsors)
         rows.append(features(rec, fields, adj, reasons))
         labels.append(1.0 if adj == gold["adjudication"] else 0.0)
     names = sorted({k for r in rows for k in r})

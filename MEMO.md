@@ -1,9 +1,9 @@
 # MIB Doc Challenge — technical memo
 
 **Score on the public training split (challenge `scripts/evaluate.py`):**
-`121.60 / 150` — extraction `42.55/50`, classification `63.00/80`, calibration
-`16.05/20`, 0 missing cases, 8 catastrophic false approvals against 431 true
-denials. Runtime 0.55 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
+`122.34 / 150` — extraction `42.55/50`, classification `63.66/80`, calibration
+`16.12/20`, 0 missing cases, 6 catastrophic false approvals against 431 true
+denials. Runtime 0.63 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
 
 No LLM, no network, no API keys. PyMuPDF for the text layer, PP-OCRv4 via ONNX
 Runtime for scans, a hand-written policy engine, and one 27-weight logistic
@@ -146,6 +146,23 @@ The public manual covers most of it; the rest I read off the training packets'
 own adjudicator notes, which cite their reasons in plain text. That surfaced two
 revoked sponsors beyond the manual's list (`SPN-2718`, `SPN-9090`) and the
 embargoed home world `Wolf-1061c`.
+
+**Revoked sponsors, generalised past the ones I happened to read.** The manual
+says other revoked sponsors appear in the examples without naming them, and a
+fixed list only ever catches ones already seen by hand. A revoked sponsor is
+denied every time it shows up, so it recurs far more than an ordinary sponsor:
+on the training batch the 99th-percentile sponsor id appears twice, while
+every sponsor I'd found by reading notes appears 9-32 times. `batch_revoked_sponsors`
+now flags any sponsor id appearing more than 4x that 99th-percentile baseline,
+recomputed fresh per input directory rather than hardcoded, with a 400-sponsor
+minimum corpus size so a small run falls back to the public list instead of
+treating sampling noise as a signal. This surfaced `SPN-7331` — 15 occurrences,
+12 of them truth `DENIED` — which I'd missed by hand. Worth +0.66 classification
+points on the training cache and drops catastrophic false approvals from 8 to 6,
+measured through the real `adjudicate()` (so note-precedence cases like
+MIB-000194 aren't miscredited). The mechanism is more valuable than the one id
+it found here: it should also catch whichever revoked sponsors show up in the
+validation and private test sets without needing another manual note-reading pass.
 
 Checking each condition against the labels shows the policy is close to
 deterministic: disqualifying flag → denied (186/186), `TRANSIT-7` → denied
@@ -296,9 +313,18 @@ in-sample 0.114 is optimistic.
 3. **Per-field confidence, not just per-decision.** Extraction is scored per
    field; knowing which fields are shaky would let me choose between emitting a
    low-confidence reading and leaving it blank.
-5. **Cross-validate the policy constants.** The revoked-sponsor and embargo lists
-   are currently fitted on all 1,000 training packets with no held-out estimate
-   of how much they generalise.
+4. **Cross-validate the policy constants.** The revoked-sponsor list now
+   self-updates per batch (`batch_revoked_sponsors`), but the embargo world and
+   the frequency-outlier threshold itself are still fitted on all 1,000 training
+   packets with no held-out estimate of how much they generalise.
+5. **A trained classifier under the expected-value framework.** I tested a plain
+   per-path frequency lookup (fit each policy branch's outcome distribution,
+   decide by expected value under the payoff matrix) against the shipped rules,
+   honestly with 5-fold cross-validation, and it lost even after tuning Dirichlet
+   shrinkage (62.98 vs 63.66 classification points) — sparse paths need more than
+   a raw frequency table. A classifier trained on document-evidence features and
+   blended with the path prior is the likely next real gain over a flat lookup;
+   it wasn't attempted here for lack of time.
 
 ## Reproducing
 

@@ -77,11 +77,13 @@ def _init_worker():
         pytesseract.pytesseract.tesseract_cmd = cmd
 
 
-def _decide(record: dict, fields: dict, case_id: str, reference_date=None) -> dict:
+def _decide(record: dict, fields: dict, case_id: str, reference_date=None, revoked_sponsors=None) -> dict:
     from mib.confidence import confidence_for
-    from mib.rules import adjudicate
+    from mib.rules import adjudicate, REVOKED_SPONSORS_PUBLIC
 
-    adjudication, reasons = adjudicate(record, fields, reference_date=reference_date)
+    adjudication, reasons = adjudicate(
+        record, fields, reference_date=reference_date,
+        revoked_sponsors=revoked_sponsors if revoked_sponsors is not None else REVOKED_SPONSORS_PUBLIC)
     confidence = confidence_for(record, fields, adjudication, reasons)
     row = {"case_id": case_id, "adjudication": adjudication, "confidence": confidence}
     for name in OUTPUT_FIELDS:
@@ -192,17 +194,21 @@ def main(argv: list[str]) -> int:
 
     # Second pass. Staleness is measured against packet receipt, which no packet
     # states, so it can only be judged once the whole batch has been read.
-    from mib.rules import batch_reference_date
+    # Revoked-sponsor frequency outliers are the same kind of batch-level fact.
+    from mib.rules import batch_reference_date, batch_revoked_sponsors
 
     reference = batch_reference_date([r["fields"] for r in results])
-    if reference is not None:
+    revoked_sponsors = batch_revoked_sponsors([r["fields"] for r in results])
+    if reference is not None or revoked_sponsors:
         for result in results:
             result["row"] = _decide(result["record"], result["fields"],
-                                    result["case_id"], reference_date=reference)
+                                    result["case_id"], reference_date=reference,
+                                    revoked_sponsors=revoked_sponsors)
         with output_path.open("w", encoding="utf-8") as out:
             for result in results:
                 out.write(json.dumps(result["row"]) + "\n")
-        print(f"batch reference date {reference}: re-decided {len(results)} cases")
+        print(f"batch reference date {reference}, "
+              f"{len(revoked_sponsors)} revoked sponsors: re-decided {len(results)} cases")
 
     elapsed = time.time() - start
     per_pdf = elapsed / max(len(files), 1)
