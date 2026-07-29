@@ -283,7 +283,30 @@ def parse_page(kind: str, lines: list[str], source: str) -> PageFields:
         _parse_sponsor_letter(blob, out)
     if kind == "note":
         _parse_note(lines, out)
+    if (kind == "fee" and "fee_status" not in out.values
+            and "fee_status" not in out.damaged):
+        recovered_fee = _recover_fee_status_by_scan(lines)
+        if recovered_fee:
+            out.values["fee_status"] = recovered_fee
+            out.uncertain.add("fee_status")
     return out
+
+
+# fee_status's vocabulary is four short, lexically distinct words. When the
+# "Fee Status" label itself is too garbled to match (a two-word label survives
+# OCR worse than a one-word value), the value can still be recovered by
+# scanning every line on a page already known to be the fee receipt. Scoped to
+# this one field and this one page kind, and always marked uncertain so a
+# guess here can never drive a fee_unpaid denial - it only helps extraction.
+def _recover_fee_status_by_scan(lines: list[str]):
+    for line in lines:
+        if _TITLE_PAT.search(line):
+            continue
+        for token in re.findall(r"[A-Za-z]{3,8}", line):
+            match = lx.snap(token, lx.FEE_STATUSES, min_ratio=0.68, margin=0.12)
+            if match:
+                return match
+    return None
 
 
 def _parse_sponsor_letter(blob: str, out: PageFields) -> None:

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mib import lexicon as lx
 from mib.pages import classify_kind
 from mib.parse import parse_page
+from mib.parse import parse_page
 from mib.rules import adjudicate, batch_revoked_sponsors, resolve_fields
 
 
@@ -234,6 +235,19 @@ def test_missing_fee_receipt_defaults_to_paid():
     # runs 45 paid to 20 waived, so the manual's waiver language misleads here.
     assert resolve_fields(_packet(visa_class="DIP-1"))["fee_status"] == "paid"
     assert resolve_fields(_packet(visa_class="XW-2"))["fee_status"] == "paid"
+
+
+def test_fee_status_recovered_when_its_own_label_is_too_garbled_to_match():
+    # "Foe Ststus" misses the 0.85 label-match threshold, but the value beside
+    # it still snaps cleanly against the four-word fee vocabulary.
+    out = parse_page("fee", ["MIB Fee Recelpt", "Coe ID:MIB-000090", "Foe Ststus: pald"], "ocr")
+    assert out.values.get("fee_status") == "paid"
+    assert "fee_status" in out.uncertain
+
+
+def test_fee_status_scan_recovery_does_not_fire_on_non_fee_pages():
+    out = parse_page("intake", ["Foe Ststus: pald"], "ocr")
+    assert "fee_status" not in out.values
 
 
 def test_stale_arrival_date_is_denied_against_the_batch_reference():
