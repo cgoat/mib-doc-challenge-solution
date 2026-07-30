@@ -1,13 +1,14 @@
 # MIB Doc Challenge — technical memo
 
 **Score on the public training split (challenge `scripts/evaluate.py`):**
-`122.34 / 150` — extraction `42.55/50`, classification `63.66/80`, calibration
+`122.56 / 150` — extraction `42.78/50`, classification `63.66/80`, calibration
 `16.12/20`, 0 missing cases, 6 catastrophic false approvals against 431 true
-denials. Runtime 0.63 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
+denials. Runtime 1.23 s/PDF on 4 vCPU against a 6 s/PDF budget; image 0.32 GiB.
 
 No LLM, no network, no API keys. PyMuPDF for the text layer, PP-OCRv4 via ONNX
-Runtime for scans, a hand-written policy engine, and one 27-weight logistic
-model for confidence, fitted on the public training labels.
+Runtime for scans (with a Tesseract second pass on the minority of pages
+where a scored field is still missing), a hand-written policy engine, and one
+27-weight logistic model for confidence, fitted on the public training labels.
 
 ## What the data actually is
 
@@ -380,16 +381,35 @@ in-sample 0.114 is optimistic.
    super-resolution/denoising model trained on this exact degradation, not a
    generic OpenCV filter), which is out of scope for the time available.
 
-## Committed, not yet shipped
+## A second OCR engine as a targeted fallback, not a preprocessing pass
 
-`parse.py`'s `_recover_fee_status_by_scan` (see commit history) recovers
-`fee_status` when its own two-word label is too OCR-garbled to match but the
-four-word value vocabulary still snaps cleanly - always marked uncertain, so
-it is pure extraction upside with zero adjudication risk. Measured on a full
-cache rebuild: 10 of 54 previously-blank reads now correct, 0 regressions,
-extraction 42.55 -> 42.57/50. Not yet pushed through the Docker/validation/PR
-cycle since the score movement (+0.01/150) doesn't justify a rebuild on its
-own; held to batch with the next change that does.
+Generic image preprocessing ahead of PP-OCR was a dead end (above). But
+comparing *which specific packets* each engine fails on told a different
+story than comparing their aggregate scores: on the 40 packets where a
+closed-vocabulary field was never recovered by RapidOCR at all, plain
+Tesseract - run through its existing deskew/glyph-mask/contrast-stretch
+pipeline - recovered 14/40 on its own, and the *union* of the two engines
+recovered 17/40. RapidOCR is still the better engine on average (that is why
+it is primary), but the two make different mistakes on the same degraded
+scans, and that difference is real, extractable signal.
+
+`document.py`'s `read_packet` now retries a page with Tesseract only when
+RapidOCR's own read left a scored field (`species_code`, `home_world`,
+`declared_purpose`, `visa_class`, `fee_status`) missing on a page kind that
+should carry it - not on every scan, so the added OCR cost lands on the
+minority of already-troublesome pages. Anything the fallback recovers is
+always marked uncertain, so a second engine's guess can supplement extraction
+but can never itself drive a decision (this also subsumes and supersedes the
+narrower fee-status-only scan-recovery from the same investigation).
+
+Measured on a full cache rebuild and verified with the official
+`scripts/evaluate.py` in a rebuilt Docker image: 55 previously-wrong or
+-blank field reads now correct (`declared_purpose` 24, `species_code` 10,
+`fee_status` 9, `home_world` 9, `visa_class` 3), **0 regressions**,
+classification and calibration unchanged (confirming the uncertain-flag
+firewall holds), catastrophic false approvals unchanged at 6. Extraction
+42.55 -> 42.78/50, total 121.60 -> 122.56/150. Runtime rose from 0.63 to
+1.23 s/PDF on 4 vCPU - still five times under the 6 s/PDF budget.
 
 ## Reproducing
 

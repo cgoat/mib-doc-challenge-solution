@@ -18,6 +18,11 @@ SOURCE_BONUS = {"text": 3.0, "ocr": 0.0}
 FOOTER_PAT = re.compile(r"Packet\s+(MIB[-\s]?\d{6})\s*/\s*page", re.I)
 HEADER_PAT = re.compile(r"(MIB-\d{6})\s*\|", re.I)
 
+# Closed-vocabulary fields worth a second OCR pass when RapidOCR misses them,
+# and the page kinds they can appear on.
+_FALLBACK_FIELDS = ("species_code", "home_world", "declared_purpose", "visa_class", "fee_status")
+_FALLBACK_KINDS = {"intake", "fee", "registry"}
+
 # Which labels a page yielded identifies it more reliably than its title does:
 # a scan can lose its heading to noise and still parse every field cleanly.
 # Ordered most to least distinctive - only the intake form carries a visa class,
@@ -95,6 +100,7 @@ def read_packet(path, text_only: bool = False) -> Packet:
     try:
         for index, page in enumerate(doc):
             text = pagemod.read_page(page, index)
+            image = None
             if text.needs_ocr and not text_only:
                 try:
                     image = ocr.native_image(doc, page)
@@ -108,6 +114,29 @@ def read_packet(path, text_only: bool = False) -> Packet:
                     text.lines = ocr_lines + text.lines
                     packet.ocr_pages += 1
             fields = parse_page(text.kind, text.lines, text.source)
+            if (image is not None and text.kind in _FALLBACK_KINDS
+                    and any(f not in fields.values and f not in fields.damaged
+                            for f in _FALLBACK_FIELDS)):
+                # RapidOCR is the better engine on average - it is the primary
+                # path - but Tesseract's dedicated preprocessing (deskew,
+                # glyph-footprint masking, contrast stretch) recovers a
+                # different subset of degraded pages than RapidOCR's own
+                # detector does. Retrying only the pages where a scored field
+                # is still missing costs OCR time on a small minority of
+                # pages, not every scan. Recovered values are always marked
+                # uncertain: a second engine's guess must never be trusted
+                # over the primary read and must never drive a decision.
+                try:
+                    tess_lines = ocr.ocr_page_tesseract(image)
+                except Exception:
+                    tess_lines = []
+                if tess_lines:
+                    fallback = parse_page(text.kind, tess_lines + text.lines, "ocr")
+                    for f in _FALLBACK_FIELDS:
+                        if (f not in fields.values and f not in fields.damaged
+                                and f in fallback.values and f not in fallback.damaged):
+                            fields.values[f] = fallback.values[f]
+                            fields.uncertain.add(f)
             if text.kind == "unknown":
                 inferred = infer_kind_from_labels(fields.values)
                 if inferred != "unknown":

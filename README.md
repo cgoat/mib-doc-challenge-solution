@@ -4,9 +4,11 @@ Reads a directory of MIB intake packet PDFs and writes `predictions.jsonl`:
 extracted applicant record plus an `APPROVED` / `DENIED` / `NEEDS_REVIEW`
 adjudication and a calibrated confidence.
 
-No network, no API keys, no LLM. PP-OCRv4 via ONNX Runtime + classical CV + a rules engine, plus
-one small logistic model (27 weights, ~2 KB) fitted on the public training split
-for confidence calibration.
+No network, no API keys, no LLM. PP-OCRv4 via ONNX Runtime is the primary OCR
+engine, with a targeted Tesseract second pass on pages where a scored field is
+still missing, plus classical CV + a rules engine and one small logistic model
+(27 weights, ~2 KB) fitted on the public training split for confidence
+calibration.
 
 ## Run it
 
@@ -28,7 +30,7 @@ python -m pytest tests/ -q
 
 ## Score on the public training split
 
-`122.34 / 150` — extraction `42.55/50`, classification `63.66/80`, calibration
+`122.56 / 150` — extraction `42.78/50`, classification `63.66/80`, calibration
 `16.12/20`, no missing cases, 6 catastrophic false approvals out of 431 denials.
 Measured with the challenge's own `scripts/evaluate.py`.
 
